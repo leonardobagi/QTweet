@@ -1,0 +1,56 @@
+version: "3.7"
+
+services:
+  qtweet:
+    build: 
+      context: .
+      args:
+        PREFIX: "${PREFIX}"
+        BOT_NAME: "${BOT_NAME}"
+    image: navenn_t/qtweet
+    restart: always
+    environment:
+      TZ: ${TIMEZONE}
+      PGHOST: postgres
+      PGDATABASE: ${DB_NAME}
+      PGPASSWORD: ${DB_PASSWORD}
+      PGUSER: ${DB_USER}
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      TWITTER_API_KEY: ${TWITTER_API_KEY}
+      TWITTER_API_SECRET_KEY: ${TWITTER_API_SECRET_KEY}
+      TWITTER_ACCESS_TOKEN: ${TWITTER_ACCESS_TOKEN}
+      TWITTER_ACCESS_TOKEN_SECRET: ${TWITTER_ACCESS_TOKEN_SECRET}
+      DBL_TOKEN: ${DBL_TOKEN}
+      PREFIX: ${PREFIX:-!!}
+      DEFAULT_LANG: ${DEFAULT_LANG:-en}
+      BOT_NAME: ${BOT_NAME:-QTweet}
+      SHARD_SPAWN_DELAY: ${SHARD_SPAWN_DELAY:-20000}
+      SHARD_SPAWN_TIMEOUT: ${SHARD_SPAWN_TIMEOUT:-120000}
+      VERBOSE: ${VERBOSE}
+      TWITTER_MAX_RECONNECT_DELAY: ${TWITTER_MAX_RECONNECT_DELAY:-240000}
+      TWEETS_TIMEOUT: ${TWEETS_TIMEOUT:-3600}
+      USERS_CHECK_TIMEOUT: ${USERS_CHECK_TIMEOUT:-1800}
+      USERS_BATCH_SIZE: ${USERS_BATCH_SIZE:-500}
+      DISABLE_SANITY_CHECK: ${DISABLE_SANITY_CHECK:-0}
+      DISABLE_STREAMS: ${DISABLE_STREAMS:-0}
+      MOD_ROLE: ${MOD_ROLE:-qtweet-mod}
+      PROFILE_URL: ${PROFILE_URL:-https://discordbots.org/bot/433615162394804224}
+      OWNER_ID: ${OWNER_ID:-135712262156451840}
+      SUPPORTED_LANGS: ${SUPPORTED_LANGS:-en fr ro nl ru sv zh de ja pt}
+      SLASH_CMDS_GUILD: ${SLASH_CMDS_GUILD}
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:13-alpine
+    restart: always
+    volumes:
+      - ./db-init:/docker-entrypoint-initdb.d
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+
+volumes:
+  pgdata:
