@@ -3,25 +3,17 @@ import unfurl from 'unfurl.js';
 import { isSet } from './flags';
 import Backup from './backup';
 import log from './log';
+import fs from 'fs';
+import https from 'https';
 
 import { post, someoneHasChannel } from './shardMgr/shardManager';
 import Stream from './twitterStream';
-import {
-  updateUser,
-  getUserIds,
-  getUsersForSanityCheck,
-  bulkDeleteUsers,
-} from './db/user';
-import {
-  getUserSubs,
-} from './db/subs';
-import {
-  getChannels,
-  rmChannel,
-} from './db/channels';
-import {
-  sanityCheck as dbSanityCheck,
-} from './db';
+import { updateUser, getUserIds, getUsersForSanityCheck, bulkDeleteUsers } from './db/user';
+import { getUserSubs } from './db/subs';
+import { getChannels, rmChannel } from './db/channels';
+import { sanityCheck as dbSanityCheck } from './db';
+import { resolve, join } from 'path';
+import { timeStamp } from 'console';
 
 // Stream object, holds the twitter feed we get posts from, initialized at the first
 let stream = null;
@@ -53,7 +45,9 @@ const reconnectionDelay = new Backup({
 let reconnectionTimeoutID = null;
 
 export const destroyStream = () => {
-  if (stream) { stream.disconnected(); }
+  if (stream) {
+    stream.disconnected();
+  }
 };
 
 function resetTwitterTimeout() {
@@ -65,7 +59,7 @@ function resetTwitterTimeout() {
     twitterTimeout = null;
     log(`❌ ${twitterTimeoutDelay}s without tweets, resetting stream...`);
     if (reconnectionTimeoutID) {
-      log('❌ We\'re already in reconnection mode, abort timeout system');
+      log("❌ We're already in reconnection mode, abort timeout system");
       return;
     }
     destroyStream();
@@ -75,32 +69,23 @@ function resetTwitterTimeout() {
 }
 
 // Checks if a tweet has any media attached. If false, it's a text tweet
-export const hasMedia = ({
-  extended_entities: extendedEntities,
-  extended_tweet: extendedTweet,
-  retweeted_status: retweetedStatus,
-}) => (extendedEntities
-    && extendedEntities.media
-    && extendedEntities.media.length > 0)
-  || (extendedTweet
-    && extendedTweet.extended_entities
-    && extendedTweet.extended_entities.media
-    && extendedTweet.extended_entities.media.length > 0)
-  || (retweetedStatus
-    && retweetedStatus.extended_entities
-    && retweetedStatus.extended_entities.media
-    && retweetedStatus.extended_entities.media.length > 0);
+export const hasMedia = ({ extended_entities: extendedEntities, extended_tweet: extendedTweet, retweeted_status: retweetedStatus }) =>
+  (extendedEntities && extendedEntities.media && extendedEntities.media.length > 0) ||
+  (extendedTweet && extendedTweet.extended_entities && extendedTweet.extended_entities.media && extendedTweet.extended_entities.media.length > 0) ||
+  (retweetedStatus && retweetedStatus.extended_entities && retweetedStatus.extended_entities.media && retweetedStatus.extended_entities.media.length > 0);
 
 // Validation function for tweets
-export const isValid = (tweet) => !(
-  // Ignore undefined or null tweets
-  !tweet
-    // Ignore tweets without a user object
-    || !tweet.user
-    // Ignore tweets where there is a quote status and not a quoted_status or a user for it.
-    || (tweet.is_quote_status
-      && (!tweet.quoted_status || !tweet.quoted_status.user))
-);
+export const isValid = (tweet) =>
+  !(
+    // Ignore undefined or null tweets
+    (
+      !tweet ||
+      // Ignore tweets without a user object
+      !tweet.user ||
+      // Ignore tweets where there is a quote status and not a quoted_status or a user for it.
+      (tweet.is_quote_status && (!tweet.quoted_status || !tweet.quoted_status.user))
+    )
+  );
 
 const unfurlUrl = async (url) => {
   const { expanded_url: expandedUrl, indices } = url;
@@ -122,7 +107,7 @@ const bestPicture = (twitterCard, openGraph) => {
     if (!url) return false; // Ignore invalid images
     if (!url.startsWith('http') && !url.startsWith('//')) return false; // Ignore URLS that aren't valid
     const idx = url.indexOf('.');
-    return (idx > -1 && idx < url.length - 1); // Ignore if there's no dot
+    return idx > -1 && idx < url.length - 1; // Ignore if there's no dot
   });
   if (images.length < 1) return null;
   const bestImg = images[0].url;
@@ -140,9 +125,7 @@ const formatTweetText = async (text, entities, isTextTweet) => {
   let replyIndex = 0;
   if (userMentions) {
     userMentions
-      .filter(
-        ({ screen_name: screenName, indices }) => screenName && indices && indices.length === 2,
-      )
+      .filter(({ screen_name: screenName, indices }) => screenName && indices && indices.length === 2)
       .forEach(({ screen_name: screenName, name, indices }) => {
         const [start, end] = indices;
         if (inReplies && start === replyIndex) {
@@ -153,9 +136,7 @@ const formatTweetText = async (text, entities, isTextTweet) => {
           changes.push({
             start,
             end,
-            newText: `[@${
-              name || screenName
-            }](https://twitter.com/${screenName})`,
+            newText: `[@${name || screenName}](https://twitter.com/${screenName})`,
           });
         }
       });
@@ -165,15 +146,10 @@ const formatTweetText = async (text, entities, isTextTweet) => {
     const unfurledLinks = await Promise.all(urls.map(unfurlUrl));
     for (let i = unfurledLinks.length - 1; i >= 0; i -= 1) {
       if (unfurledLinks[i] !== null) {
-        const {
-          expandedUrl, indices,
-        } = unfurledLinks[i];
+        const { expandedUrl, indices } = unfurledLinks[i];
         if (isTextTweet && !bestPreview && unfurledLinks[i].unfurledUrl !== null) {
           const {
-            unfurledUrl: {
-              open_graph: openGraph,
-              twitter_card: twitterCard,
-            },
+            unfurledUrl: { open_graph: openGraph, twitter_card: twitterCard },
           } = unfurledLinks[i];
           bestPreview = bestPicture(twitterCard, openGraph);
         }
@@ -209,11 +185,7 @@ const formatTweetText = async (text, entities, isTextTweet) => {
         .concat(codePoints.slice(end + offset));
       offset += nt.length - (end - start);
     });
-  let fixedText = codePoints
-    .join('')
-    .replace(/&amp;/g, '&')
-    .replace(/&gt;/g, '>')
-    .replace(/&lt;/g, '<');
+  let fixedText = codePoints.join('').replace(/&amp;/g, '&').replace(/&gt;/g, '>').replace(/&lt;/g, '<');
   const linkIdx = fixedText.indexOf('https://t.co/');
   if (linkIdx > -1) {
     fixedText = fixedText.substring(0, linkIdx);
@@ -226,18 +198,8 @@ const formatTweetText = async (text, entities, isTextTweet) => {
 
 // Takes a tweet and formats it for posting.
 export const formatTweet = async (tweet, isQuoted) => {
-  const {
-    user,
-    full_text: fullText,
-    text,
-    extended_tweet: extendedTweet,
-    retweeted_status: retweetedStatus,
-  } = tweet;
-  let {
-    id_str: idStr,
-    extended_entities: extendedEntities,
-    entities,
-  } = tweet;
+  const { user, full_text: fullText, text, extended_tweet: extendedTweet, retweeted_status: retweetedStatus } = tweet;
+  let { id_str: idStr, extended_entities: extendedEntities, entities } = tweet;
   let txt = fullText || text;
   // Extended_tweet is an API twitter uses for tweets over 140 characters.
   if (extendedTweet) {
@@ -267,18 +229,12 @@ export const formatTweet = async (tweet, isQuoted) => {
     thumbnail: {
       url: user.profile_image_url_https,
     },
-    color: user.profile_link_color
-      ? parseInt(user.profile_link_color, 16)
-      : null,
+    color: user.profile_link_color ? parseInt(user.profile_link_color, 16) : null,
   };
   // For any additional files
   let files = null;
   const isTextTweet = !hasMedia(tweet);
-  const { text: formattedText, metadata } = await formatTweetText(
-    txt,
-    entities,
-    isTextTweet,
-  );
+  const { text: formattedText, metadata } = await formatTweetText(txt, entities, isTextTweet);
   txt = formattedText;
   if (isTextTweet) {
     // Text tweet
@@ -286,10 +242,7 @@ export const formatTweet = async (tweet, isQuoted) => {
       embed.image = { url: metadata.preview };
     }
     embed.color = embed.color || colors.text;
-  } else if (
-    extendedEntities.media[0].type === 'animated_gif'
-    || extendedEntities.media[0].type === 'video'
-  ) {
+  } else if (extendedEntities.media[0].type === 'animated_gif' || extendedEntities.media[0].type === 'video') {
     // Gif/video.
     const vidinfo = extendedEntities.media[0].video_info;
     let vidurl = null;
@@ -325,6 +278,36 @@ export const formatTweet = async (tweet, isQuoted) => {
     embed.color = embed.color || colors.image;
   }
   embed.description = txt;
+
+  if (!!+process.env.ENABLE_MEDIA_SAVING && embed.image?.url) {
+    (async () => {
+      log('Saving media from recieved tweet');
+
+      const path = resolve(process.env.MEDIA_SAVING);
+      const timestamp = +new Date();
+      if (!fs.existsSync(path)) fs.mkdirSync(path);
+
+      log('Fetching image from Twitter servers...');
+
+      https
+        .get(embed.image.url, (res) => {
+          log('Imaged fetched!');
+          log('Starting to write image...');
+
+          const imagePath = join(path, `image-${timestamp}.jpg`);
+
+          res
+            .pipe(fs.createWriteStream(imagePath))
+            .on('finish', () => {
+              // check if everything went well
+              if (fs.existsSync(imagePath)) log('Media saved on ' + imagePath);
+            })
+            .on('error', (err) => log('Error while saving media to disk: ' + err));
+        })
+        .on('error', (err) => log('Error while fetching image from Twitter servers:' + err.message));
+    })();
+  }
+
   return { embed: { embeds: [embed], files }, metadata };
 };
 
@@ -347,16 +330,11 @@ export const getFilteredSubs = async (tweet) => {
   // Ignore tweets from people we don't follow
   // and replies unless they're replies to oneself (threads)
   const subs = await getUserSubs(tweet.user.id_str);
-  if (
-    !subs
-    || subs.length === 0
-  ) return [];
+  if (!subs || subs.length === 0) return [];
 
   const targetSubs = [];
   for (let i = 0; i < subs.length; i += 1) {
-    const {
-      flags, channelId, isDM, msg,
-    } = subs[i];
+    const { flags, channelId, isDM, msg } = subs[i];
     if (isDM) log(`Should we post ${tweet.id_str} in channel ${channelId}?`, null, true);
     if (flagsFilter(flags, tweet)) {
       if (isDM) log(`Added (${channelId}, ${isDM}) to targetSubs.`, null, true);
@@ -408,9 +386,7 @@ const streamData = async (tweet) => {
 const streamEnd = () => {
   // The backup exponential algorithm will take care of reconnecting
   destroyStream();
-  log(
-    `❌ We got disconnected from twitter. Reconnecting in ${reconnectionDelay.value()}ms...`,
-  );
+  log(`❌ We got disconnected from twitter. Reconnecting in ${reconnectionDelay.value()}ms...`);
   if (reconnectionTimeoutID) {
     clearTimeout(reconnectionTimeoutID);
   }
@@ -433,9 +409,7 @@ const streamError = ({ url, status, statusText }) => {
   } else {
     reconnectionDelay.increment();
   }
-  log(
-    `❌ Twitter Error (${status}: ${statusText}) at ${url}. Reconnecting in ${delay}ms`,
-  );
+  log(`❌ Twitter Error (${status}: ${statusText}) at ${url}. Reconnecting in ${delay}ms`);
   // eslint-disable-next-line no-use-before-define
   reconnectionTimeoutID = setTimeout(createStreamClearTimeout, delay);
 };
@@ -449,17 +423,11 @@ export const getError = (response) => {
 // Uses the users variable
 export const createStream = async () => {
   if (reconnectionTimeoutID) {
-    log('Got a new stream request but we\'re already waiting for a reconnection...');
+    log("Got a new stream request but we're already waiting for a reconnection...");
     return null;
   }
   if (!stream) {
-    stream = new Stream(
-      tClient,
-      streamStart,
-      streamData,
-      streamError,
-      streamEnd,
-    );
+    stream = new Stream(tClient, streamStart, streamData, streamError, streamEnd);
   }
   // Get all the user IDs
   const userIds = await getUserIds();
@@ -495,20 +463,27 @@ export const usersSanityCheck = async (limit, cursor, timeout) => {
   const ids = (await getUsersForSanityCheck(limit, cursor)).map(({ twitterId }) => twitterId);
   if (ids.length < 1) return 0;
   // deleted is an array of booleans. True means the account was deleted
-  const deleted = await Promise.all(ids.map((id) => new Promise((resolve) => {
-    userLookup({ user_id: id }).then(() => {
-      resolve(false);
-    }).catch(() => {
-      resolve(true);
-    });
-  })));
+  const deleted = await Promise.all(
+    ids.map(
+      (id) =>
+        new Promise((resolve) => {
+          userLookup({ user_id: id })
+            .then(() => {
+              resolve(false);
+            })
+            .catch(() => {
+              resolve(true);
+            });
+        })
+    )
+  );
   const idsToDelete = ids.filter((id, idx) => deleted[idx]);
   try {
     const deletedUsers = idsToDelete.length > 0 ? await bulkDeleteUsers(idsToDelete) : 0;
     log(`⚙️ User sanity check: ${cursor * limit} -> ${cursor * limit + limit}, removed ${deletedUsers} invalid users`);
     if (ids.length < limit) return deletedUsers;
     await sleep(timeout);
-    return deletedUsers + await usersSanityCheck(limit, cursor + 1, timeout);
+    return deletedUsers + (await usersSanityCheck(limit, cursor + 1, timeout));
   } catch (e) {
     console.error('Error during bulk deletion, sanity check aborted');
     console.error(e);
@@ -520,18 +495,20 @@ export const usersSanityCheck = async (limit, cursor, timeout) => {
 export const sanityCheck = async () => {
   const allChannels = await getChannels();
   log(`⚙️ Starting sanity check on ${allChannels.length} channels`);
-  const areChannelsValid = await Promise.all(allChannels.map(
-    (c) => someoneHasChannel(c).then((res) => ({ c, res })),
-  ));
-  const deletedChannels = await Promise.all(areChannelsValid.map(({ c, res }) => {
-    if (res) {
-      return null;
-    }
-    log(`Found invalid channel: ${c.channelId}`);
-    return rmChannel(c.channelId);
-  }));
+  const areChannelsValid = await Promise.all(allChannels.map((c) => someoneHasChannel(c).then((res) => ({ c, res }))));
+  const deletedChannels = await Promise.all(
+    areChannelsValid.map(({ c, res }) => {
+      if (res) {
+        return null;
+      }
+      log(`Found invalid channel: ${c.channelId}`);
+      return rmChannel(c.channelId);
+    })
+  );
   const { channels, users, guilds } = await dbSanityCheck();
-  log(`✅ DB sanity check completed!\n${channels + deletedChannels.reduce((prev, del) => (del ? prev + del.channels : prev), 0)} channels, ${guilds} guilds, ${users} users removed.`);
+  log(
+    `✅ DB sanity check completed!\n${channels + deletedChannels.reduce((prev, del) => (del ? prev + del.channels : prev), 0)} channels, ${guilds} guilds, ${users} users removed.`
+  );
 
   const disableSanityCheck = !!Number(process.env.DISABLE_SANITY_CHECK);
   if (!disableSanityCheck) {
