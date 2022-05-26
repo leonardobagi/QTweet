@@ -196,6 +196,33 @@ const formatTweetText = async (text, entities, isTextTweet) => {
   };
 };
 
+const saveImage = async (url) => {
+  log('Saving media from recieved tweet');
+
+  const path = resolve(process.env.MEDIA_SAVING);
+  const timestamp = +new Date();
+  if (!fs.existsSync(path)) fs.mkdirSync(path);
+
+  log('Fetching image from Twitter servers...');
+
+  https
+    .get(url, (res) => {
+      log('Imaged fetched!');
+      log('Starting to write image...');
+
+      const imagePath = join(path, `image-${timestamp}.jpg`);
+
+      res
+        .pipe(fs.createWriteStream(imagePath))
+        .on('finish', () => {
+          // check if everything went well
+          if (fs.existsSync(imagePath)) log('Media saved on ' + imagePath);
+        })
+        .on('error', (err) => log('Error while saving media to disk: ' + err));
+    })
+    .on('error', (err) => log('Error while fetching image from Twitter servers:' + err.message));
+};
+
 // Takes a tweet and formats it for posting.
 export const formatTweet = async (tweet, isQuoted) => {
   const { user, full_text: fullText, text, extended_tweet: extendedTweet, retweeted_status: retweetedStatus } = tweet;
@@ -279,34 +306,7 @@ export const formatTweet = async (tweet, isQuoted) => {
   }
   embed.description = txt;
 
-  if (!!+process.env.ENABLE_MEDIA_SAVING && embed.image?.url) {
-    (async () => {
-      log('Saving media from recieved tweet');
-
-      const path = resolve(process.env.MEDIA_SAVING);
-      const timestamp = +new Date();
-      if (!fs.existsSync(path)) fs.mkdirSync(path);
-
-      log('Fetching image from Twitter servers...');
-
-      https
-        .get(embed.image.url, (res) => {
-          log('Imaged fetched!');
-          log('Starting to write image...');
-
-          const imagePath = join(path, `image-${timestamp}.jpg`);
-
-          res
-            .pipe(fs.createWriteStream(imagePath))
-            .on('finish', () => {
-              // check if everything went well
-              if (fs.existsSync(imagePath)) log('Media saved on ' + imagePath);
-            })
-            .on('error', (err) => log('Error while saving media to disk: ' + err));
-        })
-        .on('error', (err) => log('Error while fetching image from Twitter servers:' + err.message));
-    })();
-  }
+  if (!!+process.env.ENABLE_MEDIA_SAVING && embed.image?.url) saveImage(embed.image.url);
 
   return { embed: { embeds: [embed], files }, metadata };
 };
