@@ -1,12 +1,12 @@
-version: "3.7"
+version: '3.7'
 
 services:
   qtweet:
-    build: 
+    build:
       context: .
       args:
-        PREFIX: "${PREFIX}"
-        BOT_NAME: "${BOT_NAME}"
+        PREFIX: '${PREFIX}'
+        BOT_NAME: '${BOT_NAME}'
     image: navenn_t/qtweet
     restart: always
     environment:
@@ -38,6 +38,8 @@ services:
       OWNER_ID: ${OWNER_ID:-135712262156451840}
       SUPPORTED_LANGS: ${SUPPORTED_LANGS:-en fr ro nl ru sv zh de ja pt}
       SLASH_CMDS_GUILD: ${SLASH_CMDS_GUILD}
+      ENABLE_MEDIA_SAVING: ${ENABLE_MEDIA_SAVING}
+      MEDIA_DIR: ${MEDIA_DIR}
     depends_on:
       - postgres
 

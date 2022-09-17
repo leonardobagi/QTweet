@@ -196,31 +196,33 @@ const formatTweetText = async (text, entities, isTextTweet) => {
   };
 };
 
-const saveImage = async (url) => {
-  log('Saving media from recieved tweet');
+const saveImage = async ({ urls, username }) => {
+  log('Saving media from received tweet');
 
-  const path = resolve(process.env.MEDIA_SAVING);
-  const timestamp = +new Date();
+  const path = process.env.MEDIA_DIR + '/' + username;
+
   if (!fs.existsSync(path)) fs.mkdirSync(path);
 
-  log('Fetching image from Twitter servers...');
+  for (const url of urls) {
+    log('Fetching image from Twitter servers...');
 
-  https
-    .get(url, (res) => {
-      log('Imaged fetched!');
-      log('Starting to write image...');
+    https
+      .get(url.endsWith(':orig') ? url : url + ':orig', (res) => {
+        log('Imaged fetched!');
+        log('Starting to write image...');
 
-      const imagePath = join(path, `image-${timestamp}.jpg`);
+        const imagePath = join(path, `${url.split('/').pop()}`);
 
-      res
-        .pipe(fs.createWriteStream(imagePath))
-        .on('finish', () => {
-          // check if everything went well
-          if (fs.existsSync(imagePath)) log('Media saved on ' + imagePath);
-        })
-        .on('error', (err) => log('Error while saving media to disk: ' + err));
-    })
-    .on('error', (err) => log('Error while fetching image from Twitter servers:' + err.message));
+        res
+          .pipe(fs.createWriteStream(imagePath))
+          .on('finish', () => {
+            // check if everything went well
+            if (fs.existsSync(imagePath)) log('Media saved on ' + imagePath);
+          })
+          .on('error', (err) => log('Error while saving media to disk: ' + err));
+      })
+      .on('error', (err) => log('Error while fetching image from Twitter servers:' + err.message));
+  }
 };
 
 // Takes a tweet and formats it for posting.
@@ -303,10 +305,10 @@ export const formatTweet = async (tweet, isQuoted) => {
       files = null;
     }
     embed.color = embed.color || colors.image;
+
+    if (process.env.ENABLE_MEDIA_SAVING == '1') saveImage({ urls: [embed.image.url] ?? files, username: targetScreenName });
   }
   embed.description = txt;
-
-  if (!!+process.env.ENABLE_MEDIA_SAVING && embed.image?.url) saveImage(embed.image.url);
 
   return { embed: { embeds: [embed], files }, metadata };
 };
